@@ -1,65 +1,59 @@
-const {
-    createClient
-} = require('pexels');
+const { createClient } = require('pexels');
 const fs = require('fs');
+const path = require('path');
 const axios = require('axios');
 
-// const client = createClient('563492ad6f91700001000001e6e009f6be3d4995ac8f829a87ca99e1');
-const client = createClient('563492ad6f917000010000013734a1a3a3914d87992ea642b8c3006a');
-
-const getRandomInt = (max) => {
-    return Math.floor(Math.random() * max) + 1;
+const apiKey = process.env.PEXELS_API_KEY;
+if (!apiKey) {
+    console.error('Missing PEXELS_API_KEY env var. Get one at https://www.pexels.com/api/');
+    process.exit(1);
 }
 
-const download = (url, filename, callback) => {
-    axios({
-        url,
-        responseType: 'stream',
-    }).then(
+const client = createClient(apiKey);
+
+const tags = (process.env.YT_TAGS || 'diwali,holi').split(',').map(t => t.trim()).filter(Boolean);
+const perPage = Number(process.env.YT_PER_PAGE || 10);
+const outDir = path.resolve(__dirname, '..', 'video');
+
+fs.mkdirSync(outDir, { recursive: true });
+
+const getRandomInt = (max) => Math.floor(Math.random() * max) + 1;
+
+const download = (url, filename) =>
+    axios({ url, responseType: 'stream' }).then(
         response =>
-        new Promise((resolve, reject) => {
-            response.data
-                .pipe(fs.createWriteStream(filename))
-                .on('finish', () => resolve())
-                .on('error', e => reject(e));
-        }),
-    );
-}
-
-let count = 0;
-
-let page = getRandomInt(10);
-
-const tags = ["diwali", "holi"];
-const query = tags[Math.floor(Math.random() * tags.length)];
-
-console.log(query)
-
-function getVideos(page, callback){
-        client.videos.search({
-            query: query,
-            per_page: 10,
-            page: page,
-            orientation: 'portrait'
-        }).then(videos => {
-            videos.videos.forEach((video, idx) => {
-
-                const id = video.id;
-                const filename = `../video/${diwali}-${idx}-${Math.floor(Math.random() * 10000)}.mp4`;
-                const video_files = video.video_files;
-                const video_file = video_files.reduce((a, b) => a.height > b.height ? a : b);
-                const uri = video_file.link;
-
-                if (video_file.height > video_file.width) {
-                    console.log(uri)
-                    count = count + 1;
-                    download(uri, filename, () => {
-                        console.log(`\n ${filename}`)
-                    });
-                }
+            new Promise((resolve, reject) => {
+                response.data
+                    .pipe(fs.createWriteStream(filename))
+                    .on('finish', resolve)
+                    .on('error', reject);
             })
+    );
+
+const query = tags[Math.floor(Math.random() * tags.length)];
+const page = getRandomInt(10);
+
+console.log(`query: ${query}, page: ${page}`);
+
+client.videos
+    .search({ query, per_page: perPage, page, orientation: 'portrait' })
+    .then(({ videos }) => {
+        videos.forEach((video, idx) => {
+            const filename = path.join(
+                outDir,
+                `${query}-${idx}-${Math.floor(Math.random() * 10000)}.mp4`
+            );
+            const file = video.video_files.reduce((a, b) => (a.height > b.height ? a : b));
+
+            if (file.height > file.width) {
+                console.log(file.link);
+                download(file.link, filename)
+                    .then(() => console.log(`saved ${filename}`))
+                    .catch(err => console.error(`failed ${filename}: ${err.message}`));
+            }
         });
-
-}
-
-getVideos(page, getVideos)
+    })
+    .catch(err => {
+        console.error(`search failed: ${err.message}`);
+        process.exit(1);
+    });
